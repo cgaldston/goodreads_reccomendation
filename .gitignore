@@ -1,0 +1,5 @@
+# Ignore dataset files
+data/
+*.json
+*.json.gz
+*.csv

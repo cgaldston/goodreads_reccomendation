@@ -11,6 +11,17 @@ def connect():
 
 def create_schema(conn):
     with conn.cursor() as cur:
+        # interactions
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS interactions (
+            user_id TEXT NOT NULL,
+            book_id TEXT NOT NULL REFERENCES book_metadata(book_id),
+            rating FLOAT NOT NULL,
+            timestamp TIMESTAMP,
+            PRIMARY KEY (user_id, book_id)
+        );
+        """)
+        
         # Book metadata
         cur.execute("""
         CREATE TABLE IF NOT EXISTS book_metadata (

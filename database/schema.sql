@@ -1,26 +1,45 @@
 -- schema.sql
 
 -- Book metadata table
-CREATE TABLE IF NOT EXISTS book_metadata (
+CREATE TABLE users (
+  user_id TEXT PRIMARY KEY,
+  join_date DATE,
+  location TEXT,
+  num_books_read INT,
+  avg_rating_given FLOAT
+);
+
+
+CREATE TABLE books (
     book_id TEXT PRIMARY KEY,
+
     title TEXT,
+    description TEXT,
+
+    author_id TEXT,
+    author_name TEXT,
+
     average_rating FLOAT,
-    num_pages INTEGER,
+    ratings_count INTEGER,
     publication_year INTEGER,
-    image_url TEXT
+
+    genres TEXT[],
+    top_shelves TEXT[],
+
+    num_pages INTEGER,
+    cover_image_url TEXT,
+
+    isbn TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Authors table
-CREATE TABLE IF NOT EXISTS authors (
-    author_id TEXT PRIMARY KEY,
-    name TEXT,
-    average_rating FLOAT,
-    ratings_count INTEGER
-);
-
--- Book-Author join table (many-to-many)
-CREATE TABLE IF NOT EXISTS book_authors (
-    book_id TEXT REFERENCES book_metadata(book_id),
-    author_id TEXT REFERENCES authors(author_id),
-    PRIMARY KEY (book_id, author_id)
+CREATE TABLE interactions (
+  user_id TEXT REFERENCES users(user_id),
+  book_id TEXT REFERENCES books(book_id),
+  user_rating INT,
+  date_read DATE,
+  shelves TEXT[],
+  PRIMARY KEY (user_id, book_id)
 );

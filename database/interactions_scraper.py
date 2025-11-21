@@ -263,7 +263,7 @@ class GoodreadsUserScraper:
                 "book_id": inter.book_id,
                 "user_rating": inter.user_rating,
                 "date_read": inter.date_read,
-                "shelves": 'read',
+                "shelf": 'read',
             })
 
         try:

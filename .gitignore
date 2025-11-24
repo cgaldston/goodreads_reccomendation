@@ -1,3 +1,5 @@
+.env
+
 # Ignore dataset files
 data/
 *.json

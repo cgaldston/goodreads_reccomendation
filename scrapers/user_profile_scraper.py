@@ -1,3 +1,4 @@
+# from database.supabase_client import supabase
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -33,7 +34,7 @@ class UserMetadata:
     avg_rating_given: Optional[float]
 
 # Goodreads User Scraper
-class GoodreadsUserScraper:
+class GoodreadsUserProfileScraper:
     def __init__(self, delay_range=(1, 3)):
         self.delay_range = delay_range
         self.session = requests.Session()
@@ -130,7 +131,7 @@ class GoodreadsUserScraper:
 # Runner
 # -----------------------------------------------------------
 if __name__ == "__main__":
-    scraper = GoodreadsUserScraper()
+    scraper = GoodreadsUserProfileScraper()
 
     user_id = "90227573"  # example
     user = scraper.scrape_user(user_id)

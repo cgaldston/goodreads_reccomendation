@@ -1,32 +1,47 @@
+# from database.supabase_client import supabase
 import requests
 from bs4 import BeautifulSoup
 import time
 import random
-import json
-import csv
-from urllib.parse import urljoin, urlparse
+from supabase import create_client
+import os
+from urllib.parse import urljoin
 import logging
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Optional
 import re
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Supabase credentials
+from dotenv import load_dotenv
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logger.error("Missing Supabase credentials! Check your .env file.")
+    raise EnvironmentError("SUPABASE_URL or SUPABASE_SERVICE_KEY not set.")
+
+
 @dataclass
-class BookReview:
-    """Data class to store book review information"""
+class Interaction:
+    user_id: str
+    book_id: str
     book_title: str
     book_author: str
     user_rating: Optional[int]
-    review_text: Optional[str]
     date_read: Optional[str]
-    book_url: Optional[str]
-    book_id: Optional[str]
     shelves: List[str]
+    book_url: Optional[str] = None
 
-class GoodreadsUserScraper:
+
+class GoodreadsUserInteractionsScraper:
     def __init__(self, delay_range=(1, 3)):
         """
         Initialize the scraper with rate limiting
@@ -83,7 +98,9 @@ class GoodreadsUserScraper:
         """Generate user reviews URL"""
         return f"https://www.goodreads.com/review/list/{user_id}?page={page}&shelf=read&sort=date_read&order=d"
     
-    def scrape_user_reviews_by_user_id(self, user_id: str, max_pages: int = None) -> List[BookReview]:
+    def scrape_user_interactions(self, user_id: str, max_pages: int = None) -> List[Interaction]:
+        self.current_user_id = user_id
+
         logger.info(f"Starting to scrape reviews for user ID: {user_id}")
         
         reviews = []
@@ -126,8 +143,27 @@ class GoodreadsUserScraper:
         logger.info(f"Total reviews scraped: {len(reviews)}")
         return reviews
 
+    def _normalize_date(self, date_str: Optional[str]) -> Optional[str]:
+        """Convert Goodreads date formats into YYYY-MM-DD for Postgres"""
+        if not date_str or date_str.lower() in {"not set", "none"}:
+            return None
+        
+        date_str = date_str.strip()
+
+        # Try a few common Goodreads formats
+        formats = ["%b %d, %Y", "%b %Y", "%Y"]  # e.g., "Sep 25, 2025", "Sep 2025", "2025"
+        for fmt in formats:
+            try:
+                parsed = datetime.strptime(date_str, fmt)
+                return parsed.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        
+        # If nothing works, return None
+        return None
+
     
-    def parse_review_row(self, row) -> Optional[BookReview]:
+    def parse_review_row(self, row) -> Optional[Interaction]:
         """
         Parse a single review row from the reviews page
         
@@ -180,34 +216,31 @@ class GoodreadsUserScraper:
             # Extract shelves
             shelves_elem = row.find('td', class_='field shelves')
             shelves = []
+
             if shelves_elem:
-                shelf_links = shelves_elem.find_all('a')
+                shelf_links = shelves_elem.find_all('a', class_='shelfLink')
+
                 shelves = [link.text.strip() for link in shelf_links]
             
+            
             # Extract date read
-            date_elem = row.find('td', class_='field date_read')
-            date_read = None
-            if date_elem:
-                date_div = date_elem.find('div', class_='value')
-                if date_div:
-                    date_read = date_div.text.strip()
+            date_spans = row.find_all('span', class_='date_read_value')
+            dates_read = []
+            for span in date_spans:
+                raw_date = span.text.strip()
+                normalized = self._normalize_date(raw_date)
+                if normalized:
+                    dates_read.append(normalized)
             
-            # Extract review text
-            review_elem = row.find('td', class_='field review')
-            review_text = None
-            if review_elem:
-                review_div = review_elem.find('div', class_='value')
-                if review_div:
-                    # Get text content, removing extra whitespace
-                    review_text = ' '.join(review_div.get_text().split()).strip()
-                    if not review_text:
-                        review_text = None
+            # Most recent date
+            date_read = max(dates_read) if dates_read else None
             
-            return BookReview(
+            
+            return Interaction(
+                user_id=self.current_user_id,  # store the current user ID in the class
                 book_title=book_title,
                 book_author=book_author,
                 user_rating=user_rating,
-                review_text=review_text,
                 date_read=date_read,
                 book_url=book_url,
                 book_id=book_id,
@@ -217,139 +250,43 @@ class GoodreadsUserScraper:
         except Exception as e:
             logger.error(f"Error parsing review row: {e}")
             return None
-    
-    def scrape_user_reviews(self, username: str, max_pages: int = None) -> List[BookReview]:
-        """
-        Scrape all reviews for a given user
-        
-        Args:
-            username: Goodreads username
-            max_pages: Maximum number of pages to scrape (None for all)
-            
-        Returns:
-            List of BookReview objects
-        """
-        logger.info(f"Starting to scrape reviews for user: {username}")
-        
-        # Get user ID
-        user_id = self.extract_user_id(username)
-        if not user_id:
-            logger.error(f"Could not find user ID for username: {username}")
-            return []
-        
-        logger.info(f"Found user ID: {user_id}")
-        
-        reviews = []
-        page = 1
-        
-        while True:
-            if max_pages and page > max_pages:
-                break
-                
-            reviews_url = self.get_user_reviews_url(user_id, page)
-            soup = self._make_request(reviews_url)
-            
-            if not soup:
-                logger.error(f"Failed to load page {page}")
-                break
-            
-            # Find review rows
-            review_rows = soup.find_all('tr', id=re.compile(r'review_\d+'))
-            
-            if not review_rows:
-                logger.info(f"No more reviews found on page {page}")
-                break
-            
-            logger.info(f"Processing page {page} with {len(review_rows)} reviews")
-            
-            page_reviews = []
-            for row in review_rows:
-                review = self.parse_review_row(row)
-                if review:
-                    page_reviews.append(review)
-            
-            reviews.extend(page_reviews)
-            logger.info(f"Extracted {len(page_reviews)} reviews from page {page}")
-            
-            # Check if there's a next page
-            next_link = soup.find('a', class_='next_page')
-            if not next_link:
-                logger.info("Reached last page")
-                break
-            
-            page += 1
-        
-        logger.info(f"Total reviews scraped: {len(reviews)}")
-        return reviews
-    
-    def save_reviews_to_csv(self, reviews: List[BookReview], filename: str):
-        """Save reviews to CSV file"""
-        with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['book_title', 'book_author', 'user_rating', 'review_text', 
-                         'date_read', 'book_url', 'book_id', 'shelves']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            writer.writeheader()
-            for review in reviews:
-                writer.writerow({
-                    'book_title': review.book_title,
-                    'book_author': review.book_author,
-                    'user_rating': review.user_rating,
-                    'review_text': review.review_text,
-                    'date_read': review.date_read,
-                    'book_url': review.book_url,
-                    'book_id': review.book_id,
-                    'shelves': '|'.join(review.shelves) if review.shelves else ''
-                })
-    
-    def save_reviews_to_json(self, reviews: List[BookReview], filename: str):
-        """Save reviews to JSON file"""
-        reviews_data = []
-        for review in reviews:
-            reviews_data.append({
-                'book_title': review.book_title,
-                'book_author': review.book_author,
-                'user_rating': review.user_rating,
-                'review_text': review.review_text,
-                'date_read': review.date_read,
-                'book_url': review.book_url,
-                'book_id': review.book_id,
-                'shelves': review.shelves
+
+    def save_interactions_to_supabase(self, interactions: List[Interaction]):
+        if not interactions:
+            logger.warning("No interactions to save.")
+            return
+
+        data = []
+        for inter in interactions:
+            data.append({
+                "user_id": inter.user_id,
+                "book_id": inter.book_id,
+                "user_rating": inter.user_rating,
+                "date_read": inter.date_read,
+                "shelf": 'read',
             })
-        
-        with open(filename, 'w', encoding='utf-8') as jsonfile:
-            json.dump(reviews_data, jsonfile, indent=2, ensure_ascii=False)
+
+        try:
+            response = supabase.table("interactions").upsert(data).execute()
+            logger.info(f"Saved {len(data)} interactions to Supabase.")
+        except Exception as e:
+            logger.error(f"Failed to save interactions to Supabase: {e}")
+
+
 
 # Example usage
 if __name__ == "__main__":
-    scraper = GoodreadsUserScraper(delay_range=(2, 4))  # 2-4 second delays
-    
-    # Replace with actual username
-    user_id = "101098244"  # Change this to test
-    
+    scraper = GoodreadsUserInteractionsScraper(delay_range=(2, 4))
+    user_id = "101098244"
+
     try:
-        # Scrape reviews (limit to 5 pages for testing)
-        reviews = scraper.scrape_user_reviews_by_user_id(user_id, max_pages=5)
-        
-        if reviews:
-            # Save to files
-            scraper.save_reviews_to_csv(reviews, f"{user_id}_reviews.csv")
-            scraper.save_reviews_to_json(reviews, f"{user_id}_reviews.json")
-            
-            print(f"Successfully scraped {len(reviews)} reviews for {user_id}")
-            
-            # Print first few reviews as example
-            for i, review in enumerate(reviews[:3]):
-                print(f"\nReview {i+1}:")
-                print(f"Title: {review.book_title}")
-                print(f"Author: {review.book_author}")
-                print(f"Rating: {review.user_rating}/5")
-                print(f"Date Read: {review.date_read}")
-                print(f"Review: {review.review_text[:200] if review.review_text else 'No review'}...")
+        interactions = scraper.scrape_user_interactions(user_id, max_pages=5)
+        if interactions:
+            scraper.save_interactions_to_supabase(interactions)
+            print(f"✅ Saved {len(interactions)} interactions for {user_id}")
         else:
-            print("No reviews found or scraping failed")
-            
+            print("No interactions found.")
     except KeyboardInterrupt:
-        print("\nScraping interrupted by user")
+        print("\nScraping interrupted.")
     except Exception as e:
         logger.error(f"Unexpected error: {e}")

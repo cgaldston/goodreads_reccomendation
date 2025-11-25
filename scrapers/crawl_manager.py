@@ -21,7 +21,7 @@ VISITED_BOOKS_FILE = os.path.join(CRAWL_DIR, "visited_books.json")
 
 class CrawlManager:
 
-    def __init__(self, max_depth=3, reviewers_per_book=5):
+    def __init__(self, max_depth=1, reviewers_per_book=3):
         self.max_depth = max_depth
         self.reviewers_per_book = reviewers_per_book
 
@@ -145,6 +145,6 @@ if __name__ == "__main__":
     manager = CrawlManager(max_depth=3, reviewers_per_book=5)
 
     # Seed user
-    manager.add_seed_user("101098244")
+    manager.add_seed_user("172940526")
 
     manager.run()

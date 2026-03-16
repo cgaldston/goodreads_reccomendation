@@ -5,3 +5,6 @@ data/
 *.json
 *.json.gz
 *.csv
+
+# Local session notes
+instructions/

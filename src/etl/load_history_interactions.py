@@ -43,9 +43,16 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 # Defaults (override via CLI flags or EDA findings)
 # --------------------------------------------------------------------------- #
-DEFAULT_MIN_USER_RATINGS: int = 5
+DEFAULT_MIN_USER_RATINGS: int = 3
 DEFAULT_MIN_BOOK_RATINGS: int = 10
-DEFAULT_BATCH_SIZE: int = 500
+DEFAULT_BATCH_SIZE: int = 2000
+
+# Conflict columns per table — must match PRIMARY KEY constraints in schema.sql
+_ON_CONFLICT: dict[str, str] = {
+    "users": "user_id",
+    "books": "book_id",
+    "interactions": "user_id,book_id",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -169,9 +176,10 @@ def _build_filtered_df(
 
 def _upsert_batches(table: str, records: list[dict], batch_size: int) -> None:
     """Upsert a list of dicts into Supabase in batches."""
+    on_conflict = _ON_CONFLICT[table]
     for start in tqdm(range(0, len(records), batch_size), desc=f"upserting {table}"):
         batch = records[start : start + batch_size]
-        supabase.table(table).upsert(batch, on_conflict="*").execute()
+        supabase.table(table).upsert(batch, on_conflict=on_conflict).execute()
 
 
 def load(

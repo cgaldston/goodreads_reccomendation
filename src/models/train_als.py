@@ -72,6 +72,47 @@ def load_interactions() -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
+# Filtering
+# --------------------------------------------------------------------------- #
+
+def filter_interactions(
+    df: pd.DataFrame,
+    min_book_ratings: int = 50,
+    min_user_ratings: int = 3,
+) -> pd.DataFrame:
+    """Drop low-signal books and users from the interaction DataFrame.
+
+    Applied after loading so the DB doesn't need to be re-ETL'd when
+    thresholds change. Filters are applied iteratively until stable:
+    removing books can drop users below min_user_ratings and vice versa.
+
+    Args:
+        df:                Raw interactions DataFrame.
+        min_book_ratings:  Minimum interactions a book must have to be kept.
+        min_user_ratings:  Minimum interactions a user must have to be kept.
+
+    Returns:
+        Filtered DataFrame.
+    """
+    before = len(df)
+    for _ in range(10):  # iterate until stable (usually converges in 2-3 passes)
+        book_counts = df["book_id"].value_counts()
+        df = df[df["book_id"].isin(book_counts[book_counts >= min_book_ratings].index)]
+        user_counts = df["user_id"].value_counts()
+        df = df[df["user_id"].isin(user_counts[user_counts >= min_user_ratings].index)]
+        if len(df) == before:
+            break
+        before = len(df)
+
+    log.info(
+        "After filtering (min_book=%d, min_user=%d): %d interactions / %d users / %d books",
+        min_book_ratings, min_user_ratings,
+        len(df), df["user_id"].nunique(), df["book_id"].nunique(),
+    )
+    return df.reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------- #
 # Matrix construction
 # --------------------------------------------------------------------------- #
 
@@ -124,6 +165,8 @@ def train(
     train_fraction: float = 0.8,
     output_dir: Path = Path("models/"),
     random_state: int = 42,
+    min_book_ratings: int = 50,
+    min_user_ratings: int = 3,
 ) -> None:
     """Full training pipeline.
 
@@ -133,17 +176,20 @@ def train(
     model, unlike a user-level split.
 
     Args:
-        factors:        Number of latent factors.
-        iterations:     ALS training iterations.
-        regularization: L2 regularization weight.
-        train_fraction: Fraction of each user's interactions kept for training.
-        output_dir:     Directory to save model artifacts.
-        random_state:   Seed for reproducibility (must match evaluate.py).
+        factors:           Number of latent factors.
+        iterations:        ALS training iterations.
+        regularization:    L2 regularization weight.
+        train_fraction:    Fraction of each user's interactions kept for training.
+        output_dir:        Directory to save model artifacts.
+        random_state:      Seed for reproducibility (must match evaluate.py).
+        min_book_ratings:  Minimum interactions a book must have to be included.
+        min_user_ratings:  Minimum interactions a user must have to be included.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_interactions()
+    df = filter_interactions(df, min_book_ratings=min_book_ratings, min_user_ratings=min_user_ratings)
     user_item, user_index, item_index = build_sparse_matrix(df)
 
     # Interaction-level split: hold out (1 - train_fraction) of each user's
@@ -211,6 +257,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--train-fraction", type=float, default=0.8)
     parser.add_argument("--output-dir", type=Path, default=Path("models/"))
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument("--min-book-ratings", type=int, default=50)
+    parser.add_argument("--min-user-ratings", type=int, default=3)
     return parser.parse_args()
 
 
@@ -223,4 +271,6 @@ if __name__ == "__main__":
         train_fraction=args.train_fraction,
         output_dir=args.output_dir,
         random_state=args.random_state,
+        min_book_ratings=args.min_book_ratings,
+        min_user_ratings=args.min_user_ratings,
     )

@@ -21,9 +21,10 @@ from typing import Optional
 
 import numpy as np
 from scipy.sparse import csr_matrix
+from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from database.db import supabase
+from database.db import engine
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ def load_artifacts(model_dir: Path = _DEFAULT_MODEL_DIR) -> None:
 
 
 def _fetch_book_metadata(book_ids: list[str]) -> list[dict]:
-    """Fetch book metadata from Supabase for a list of book_ids.
+    """Fetch book metadata from local Postgres for a list of book_ids.
 
     Args:
         book_ids: List of Goodreads book_id strings.
@@ -86,13 +87,15 @@ def _fetch_book_metadata(book_ids: list[str]) -> list[dict]:
     """
     if not book_ids:
         return []
-    resp = (
-        supabase.table("books")
-        .select("book_id, title, author_name, average_rating, ratings_count, cover_image_url")
-        .in_("book_id", book_ids)
-        .execute()
-    )
-    return resp.data or []
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(
+                "SELECT book_id, title, author_name, average_rating, ratings_count, cover_image_url"
+                " FROM books WHERE book_id = ANY(:ids)"
+            ),
+            {"ids": book_ids},
+        )
+        return [dict(row._mapping) for row in result]
 
 
 def get_recommendations(
@@ -160,7 +163,7 @@ def get_recommendations(
         0,
         user_items,
         N=n,
-        filter_already_liked=True,
+        filter_already_liked_items=True,
     )
 
     # --- Decode to book_ids ---

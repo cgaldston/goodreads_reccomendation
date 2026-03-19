@@ -323,7 +323,7 @@ def evaluate(
     log.info("Evaluating ALS model (K=%d, sample_n=%d)...", k, sample_n)
 
     def als_recommend(uid: int, train_row: csr_matrix) -> list[int]:
-        ids, _ = model.recommend(uid, train_row, N=k, filter_already_liked=True)
+        ids, _ = model.recommend(uid, train_row, N=k, filter_already_liked_items=True)
         return ids.tolist()
 
     als_metrics = _evaluate_recommender(

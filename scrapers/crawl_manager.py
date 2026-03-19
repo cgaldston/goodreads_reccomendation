@@ -4,7 +4,7 @@ import logging
 import json
 import os
 from collections import deque
-from database.supabase_client import supabase
+from database.db import supabase
 from scrapers.user_profile_scraper import GoodreadsUserProfileScraper
 from scrapers.reviewer_scraper import GoodreadsReviewerScraper
 from scrapers.book_scraper import GoodreadsBookScraper

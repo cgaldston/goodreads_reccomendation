@@ -31,7 +31,9 @@ from tqdm import tqdm
 
 # Allow running from project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from database.supabase_client import supabase
+from psycopg2.extras import execute_values
+
+from database.db import engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,11 +49,33 @@ DEFAULT_MIN_USER_RATINGS: int = 3
 DEFAULT_MIN_BOOK_RATINGS: int = 10
 DEFAULT_BATCH_SIZE: int = 2000
 
-# Conflict columns per table — must match PRIMARY KEY constraints in schema.sql
-_ON_CONFLICT: dict[str, str] = {
-    "users": "user_id",
-    "books": "book_id",
-    "interactions": "user_id,book_id",
+# Upsert SQL per table — ON CONFLICT targets must match PRIMARY KEY constraints in schema.sql
+_UPSERT_SQL: dict[str, str] = {
+    "users": """
+        INSERT INTO users (user_id)
+        VALUES %s
+        ON CONFLICT (user_id) DO NOTHING
+    """,
+    "books": """
+        INSERT INTO books (book_id)
+        VALUES %s
+        ON CONFLICT (book_id) DO NOTHING
+    """,
+    "interactions": """
+        INSERT INTO interactions (user_id, book_id, user_rating, date_read, shelves)
+        VALUES %s
+        ON CONFLICT (user_id, book_id) DO UPDATE SET
+            user_rating = EXCLUDED.user_rating,
+            date_read   = EXCLUDED.date_read,
+            shelves     = EXCLUDED.shelves
+    """,
+}
+
+# Column order must match the VALUES %s placeholders above
+_RECORD_COLS: dict[str, list[str]] = {
+    "users": ["user_id"],
+    "books": ["book_id"],
+    "interactions": ["user_id", "book_id", "user_rating", "date_read", "shelves"],
 }
 
 
@@ -175,11 +199,19 @@ def _build_filtered_df(
 
 
 def _upsert_batches(table: str, records: list[dict], batch_size: int) -> None:
-    """Upsert a list of dicts into Supabase in batches."""
-    on_conflict = _ON_CONFLICT[table]
-    for start in tqdm(range(0, len(records), batch_size), desc=f"upserting {table}"):
-        batch = records[start : start + batch_size]
-        supabase.table(table).upsert(batch, on_conflict=on_conflict).execute()
+    """Upsert a list of dicts into local Postgres in batches via execute_values."""
+    sql = _UPSERT_SQL[table]
+    cols = _RECORD_COLS[table]
+    conn = engine.raw_connection()
+    try:
+        with conn.cursor() as cur:
+            for start in tqdm(range(0, len(records), batch_size), desc=f"upserting {table}"):
+                batch = records[start : start + batch_size]
+                tuples = [tuple(r[c] for c in cols) for r in batch]
+                execute_values(cur, sql, tuples)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def load(

@@ -35,7 +35,7 @@ from tqdm import tqdm
 import implicit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from database.supabase_client import supabase
+from database.db import engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,40 +44,25 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Page size for Supabase queries (max allowed is 1000)
-_SUPABASE_PAGE_SIZE = 1000
-
-
 # --------------------------------------------------------------------------- #
 # Data loading
 # --------------------------------------------------------------------------- #
 
 def load_interactions() -> pd.DataFrame:
-    """Pull all interactions from Supabase in paginated chunks.
+    """Load all interactions from local Postgres.
 
     Returns:
         DataFrame with columns: user_id, book_id, user_rating
     """
-    log.info("Fetching interactions from Supabase...")
-    rows: list[dict] = []
-    offset = 0
-    while True:
-        resp = (
-            supabase.table("interactions")
-            .select("user_id, book_id, user_rating")
-            .range(offset, offset + _SUPABASE_PAGE_SIZE - 1)
-            .execute()
-        )
-        batch = resp.data
-        if not batch:
-            break
-        rows.extend(batch)
-        offset += len(batch)
-        if len(batch) < _SUPABASE_PAGE_SIZE:
-            break
-
-    df = pd.DataFrame(rows)
-    log.info("Loaded %d interactions (%d users, %d books)", len(df), df["user_id"].nunique(), df["book_id"].nunique())
+    log.info("Loading interactions from local Postgres...")
+    df = pd.read_sql(
+        "SELECT user_id, book_id, user_rating FROM interactions",
+        engine,
+    )
+    log.info(
+        "Loaded %d interactions (%d users, %d books)",
+        len(df), df["user_id"].nunique(), df["book_id"].nunique(),
+    )
     return df
 
 

@@ -23,7 +23,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from database.supabase_client import supabase
+from database.db import supabase
 
 log = logging.getLogger(__name__)
 

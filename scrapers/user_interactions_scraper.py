@@ -1,4 +1,4 @@
-# from database.supabase_client import supabase
+# from database.db import supabase
 import requests
 from bs4 import BeautifulSoup
 import time

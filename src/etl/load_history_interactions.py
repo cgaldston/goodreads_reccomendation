@@ -1,21 +1,23 @@
-"""ETL script: load history/biography genre subset into Supabase.
+"""ETL script: load history/biography genre subset into local Postgres.
 
 Input:  data/goodreads_interactions_history_biography.json  (JSONL, ~9.9GB)
-Output: interactions, books (stub), and users (stub) tables in Supabase
+Output: interactions, books (stub), and users (stub) tables in local Postgres
 
 Usage:
     python -m src.etl.load_history_interactions \
         --file data/goodreads_interactions_history_biography.json \
-        --min-user-ratings 5 \
-        --min-book-ratings 10 \
-        --batch-size 500
+        --min-user-ratings 3 \
+        --min-book-ratings 50 \
+        --batch-size 2000
 
 Filter logic (from EDA — see notebooks/01_eda_history_subset.ipynb):
     - Keep only rows where is_read=True and rating > 0 (explicit ratings only)
     - Drop users with fewer than MIN_USER_RATINGS explicit ratings
     - Drop books with fewer than MIN_BOOK_RATINGS explicit ratings
-    These thresholds cut ~60-70% of the long tail while retaining the dense core
-    needed for ALS to produce meaningful factors.
+    Thresholds (min_user_ratings=3, min_book_ratings=50) validated via smoke test:
+    raising min_book_ratings from 10→50 eliminated popularity collapse in ALS output.
+    Retains ~86% of signal while cutting 72% of the noisy long tail (28,542 books,
+    9.9M interactions).
 """
 
 import argparse
@@ -46,7 +48,7 @@ log = logging.getLogger(__name__)
 # Defaults (override via CLI flags or EDA findings)
 # --------------------------------------------------------------------------- #
 DEFAULT_MIN_USER_RATINGS: int = 3
-DEFAULT_MIN_BOOK_RATINGS: int = 10
+DEFAULT_MIN_BOOK_RATINGS: int = 50
 DEFAULT_BATCH_SIZE: int = 2000
 
 # Upsert SQL per table — ON CONFLICT targets must match PRIMARY KEY constraints in schema.sql
